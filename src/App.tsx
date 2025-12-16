@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Loader2,
   Info,
+  Clock,
 } from "lucide-react";
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
@@ -42,6 +43,22 @@ const db = getFirestore(app);
 
 const COLLECTION_NAME = "survey_responses";
 
+// --- CONFIGURACIÓN DE LA MATRIZ ---
+const MATRIX_CONTEXTS = [
+  { id: "commute", label: "Trabajo / Estudios (Rutina diaria)" },
+  { id: "shopping", label: "Compras / Recados / Gestiones" },
+  { id: "leisure", label: "Ocio / Social / Deporte" },
+  { id: "family", label: "Transporte familiar / Acompañantes" },
+  { id: "travel", label: "Viajes largos / Turismo" },
+];
+
+const MATRIX_FREQUENCIES = [
+  { value: "daily", label: "Diario (5+ días/sem)" },
+  { value: "weekly", label: "Frecuente (1-4 días/sem)" },
+  { value: "sporadic", label: "Ocasional" },
+  { value: "never", label: "Nunca" },
+];
+
 export default function App() {
   const [currentStep, setCurrentStep] = useState(0);
   const [answers, setAnswers] = useState({});
@@ -55,7 +72,6 @@ export default function App() {
 
   // --- SOLUCIÓN DE DISEÑO: Inyectar Tailwind CSS ---
   useEffect(() => {
-    // Esto carga los estilos automáticamente si no están presentes
     if (!document.getElementById("tailwind-cdn")) {
       const script = document.createElement("script");
       script.id = "tailwind-cdn";
@@ -130,14 +146,22 @@ export default function App() {
   }, []);
 
   const getUserPath = () => {
-    const vehicles = answers.vehicles || [];
-    const hasCar =
-      vehicles.includes("car_gas") || vehicles.includes("car_electric");
-    const hasOtherVehicle = vehicles.some((v) =>
-      ["moto_gas", "moto_electric", "bike", "ebike", "scooter"].includes(v)
-    );
-    const hasNoVehicle = vehicles.includes("none");
-    return { hasCar, hasOtherVehicle, hasNoVehicle };
+    const vehicles = answers.vehicles; // Single choice (string)
+
+    // Check if a vehicle is selected (and not 'none')
+    const hasAnyVehicle = vehicles && vehicles !== "none";
+
+    const hasCar = vehicles === "car_gas" || vehicles === "car_electric";
+    const hasOtherVehicle = [
+      "moto_gas",
+      "moto_electric",
+      "bike",
+      "ebike",
+      "scooter",
+    ].includes(vehicles);
+    const hasNoVehicle = vehicles === "none";
+
+    return { hasCar, hasOtherVehicle, hasNoVehicle, hasAnyVehicle };
   };
 
   const questions = [
@@ -145,7 +169,16 @@ export default function App() {
       id: "intro",
       type: "intro",
       title: "Estudio Académico sobre Movilidad Urbana en Almería",
-      content: `Estimado/a participante,\n\nSoy Soufyan Essoubai, estudiante de Global Business and Economics. Estoy llevando a cabo una investigación académica para mi tesis de grado, cuyo objetivo es analizar los patrones de movilidad urbana en la provincia de Almería e identificar oportunidades de mejora en la infraestructura de transporte.\n\nLa encuesta es completamente anónima y los datos recopilados serán tratados con estricta confidencialidad y utilizados exclusivamente para fines académicos.\n\nTiempo estimado: 3-5 minutos.\nAgradezco sinceramente su colaboración.`,
+      content: `Estimado/a participante,\n\nSoy Soufyan Essoubai Chikh, estudiante de Global Business and Economics. Estoy llevando a cabo una investigación académica para mi tesis de grado, cuyo objetivo es analizar los patrones de movilidad urbana en la provincia de Almería e identificar oportunidades de mejora en la infraestructura de transporte.\n\nLa encuesta es completamente anónima y los datos recopilados serán tratados con estricta confidencialidad y utilizados exclusivamente para fines académicos.\n\nTiempo estimado: 3-5 minutos.\nAgradezco sinceramente su colaboración.`,
+    },
+    // --- SORTEO AL PRINCIPIO ---
+    {
+      id: "raffle_participation_intro",
+      question: "🎁 ¡Participa en el Sorteo de 50€!",
+      subtitle:
+        "Para incentivar su participación, sorteamos una tarjeta regalo. Rellene sus datos ahora para asegurar su entrada (Opcional). Su participación se validará al enviar la encuesta.",
+      type: "raffle",
+      required: false,
     },
     {
       id: "residence",
@@ -185,9 +218,8 @@ export default function App() {
     {
       id: "occupation",
       question: "Ocupación principal",
-      subtitle:
-        "Seleccione todas las opciones que describan su situación actual",
-      type: "multiple",
+      subtitle: "Seleccione la opción que mejor describa su situación actual",
+      type: "single",
       icon: User,
       required: true,
       options: [
@@ -207,7 +239,8 @@ export default function App() {
     },
     {
       id: "travel_reasons",
-      question: "Motivos principales de desplazamiento",
+      question:
+        "Motivos principales de uso de su metodo de transporte cotidiano.",
       subtitle: "Seleccione todas las opciones pertinentes",
       type: "multiple",
       required: true,
@@ -220,6 +253,7 @@ export default function App() {
         { value: "sports", label: "Actividad física / Deporte" },
         { value: "social", label: "Visitas sociales" },
         { value: "medical", label: "Asistencia sanitaria" },
+        { value: "other", label: "Otro motivo", hasInput: true },
       ],
     },
     {
@@ -227,7 +261,7 @@ export default function App() {
       question: "Percepción de cercanía",
       subtitle:
         '¿Qué distancia considera "cercana" para un desplazamiento habitual a pie o en medios no motorizados?',
-      type: "multiple",
+      type: "single",
       required: true,
       options: [
         { value: "0-500m", label: "Hasta 500 metros" },
@@ -240,10 +274,9 @@ export default function App() {
     },
     {
       id: "vehicles",
-      question: "Propiedad de vehículos de uso personal",
-      subtitle:
-        "Seleccione todos los vehículos disponibles en su hogar para su uso",
-      type: "multiple",
+      question: "Vehículo principal de uso personal",
+      subtitle: "Seleccione el vehículo que utiliza con mayor frecuencia",
+      type: "single",
       icon: Car,
       required: true,
       options: [
@@ -260,55 +293,21 @@ export default function App() {
         { value: "none", label: "Ninguno" },
       ],
     },
+    // --- PREGUNTA MATRIZ UNIFICADA (Contexto x Frecuencia) ---
     {
-      id: "car_usage",
-      question: "Contextos de uso del vehículo privado",
-      subtitle: "Seleccione las situaciones en las que utiliza el coche",
-      type: "multiple",
-      icon: Car,
+      id: "matrix_usage_frequency",
+      question: "Patrones de uso detallados",
+      subtitle:
+        "Para su vehículo principal, indique con qué frecuencia lo utiliza en cada situación.",
+      type: "matrix_context_freq",
       required: true,
-      showIf: () => getUserPath().hasCar,
-      options: [
-        {
-          value: "daily_commute",
-          label: "Desplazamientos pendulares diarios (trabajo/estudios)",
-        },
-        {
-          value: "long_trips",
-          label: "Desplazamientos interurbanos / Larga distancia",
-        },
-        { value: "weather", label: "Condiciones meteorológicas adversas" },
-        { value: "heavy_load", label: "Transporte de carga" },
-        { value: "passengers", label: "Transporte de pasajeros acompañantes" },
-        { value: "long_urban", label: "Trayectos urbanos largos (>5 km)" },
-        {
-          value: "short_comfort",
-          label: "Trayectos cortos (preferencia por comodidad)",
-        },
-        {
-          value: "no_alternatives",
-          label: "Inexistencia de alternativas viables",
-        },
-      ],
+      showIf: () => getUserPath().hasAnyVehicle,
     },
-    {
-      id: "car_frequency",
-      question: "Frecuencia de uso del vehículo privado",
-      type: "single",
-      required: true,
-      showIf: () => getUserPath().hasCar,
-      options: [
-        { value: "daily", label: "Uso diario" },
-        { value: "4-5days", label: "4-5 días por semana" },
-        { value: "2-3days", label: "2-3 días por semana" },
-        { value: "1day", label: "1 día por semana" },
-        { value: "<1week", label: "Menos de una vez por semana" },
-        { value: "rarely", label: "Esporádicamente" },
-      ],
-    },
+    // --- FIN MATRIZ ---
+
     {
       id: "car_barriers",
-      question: "Barreras para el uso de transporte alternativo",
+      question: "Barreras para el uso de otro metodo de transporte",
       subtitle: "Seleccione hasta 3 factores principales",
       type: "multiple",
       maxSelections: 3,
@@ -343,6 +342,7 @@ export default function App() {
         },
         { value: "habit", label: "Hábito / Costumbre" },
         { value: "no_alternatives", label: "Desconocimiento de alternativas" },
+        { value: "other", label: "Otra razón", hasInput: true },
       ],
     },
     {
@@ -367,11 +367,12 @@ export default function App() {
           value: "independence",
           label: "Preferencia personal por otros medios",
         },
+        { value: "other", label: "Otro motivo", hasInput: true },
       ],
     },
     {
       id: "satisfaction_vehicle",
-      question: "Nivel de satisfacción con su movilidad actual",
+      question: "Nivel de satisfacción con su metodo de movilidad actual",
       subtitle: "1 = Muy insatisfecho | 5 = Muy satisfecho",
       type: "scale",
       required: true,
@@ -397,11 +398,13 @@ export default function App() {
           label: "Preferencia por evitar responsabilidades de propiedad",
         },
         { value: "proximity", label: "Proximidad a servicios esenciales" },
+        { value: "other", label: "Otro motivo", hasInput: true },
       ],
     },
+    // --- Q13 MODIFICADA ---
     {
       id: "decision_factors",
-      question: "Factores determinantes en la elección modal",
+      question: "Factores determinantes en tu elección de transporte",
       subtitle:
         "Ordene por importancia del 1 (Más importante) al 5 (Menos importante)",
       type: "ranking",
@@ -433,7 +436,7 @@ export default function App() {
     },
     {
       id: "motosharing_features",
-      question: "Atributos valorados en el servicio",
+      question: "Atributos valorados en el metodo de transporte",
       subtitle: "Seleccione los 3 aspectos más críticos para usted",
       type: "multiple",
       maxSelections: 3,
@@ -456,6 +459,7 @@ export default function App() {
         { value: "helmets", label: "Provisión de equipamiento de seguridad" },
         { value: "service", label: "Soporte al usuario" },
         { value: "sustainability", label: "Garantía de energía renovable" },
+        { value: "other", label: "Otro atributo", hasInput: true },
       ],
     },
     {
@@ -473,13 +477,14 @@ export default function App() {
         { value: "none", label: "No utilizaría el servicio con coste" },
       ],
     },
+    // --- Q17 MODIFICADA ---
     {
       id: "travel_experience",
-      question: "Evaluación de la experiencia de viaje actual",
+      question: "¿Como valora su experiencia actual de transporte cotidiana?",
       type: "single",
       required: true,
       options: [
-        { value: "pleasant", label: "Positiva / Relajante" },
+        { value: "pleasant", label: "Muy Positiva / Relajante" },
         { value: "neutral", label: "Neutra / Rutinaria" },
         { value: "stressful", label: "Estresante (Tráfico/Congestión)" },
         { value: "uncomfortable", label: "Incómoda (Clima/Infraestructura)" },
@@ -489,7 +494,7 @@ export default function App() {
     },
     {
       id: "almeria_problems",
-      question: "Diagnóstico de la movilidad en Almería",
+      question: "Diagnóstico del problema en la movilidad en Almería",
       subtitle: "Identifique los 2 problemas más críticos según su criterio",
       type: "multiple",
       maxSelections: 2,
@@ -514,15 +519,8 @@ export default function App() {
           label: "Ausencia de modelos de movilidad innovadores",
         },
         { value: "climate", label: "Condiciones climáticas adversas" },
+        { value: "other", label: "Otro problema", hasInput: true },
       ],
-    },
-    {
-      id: "raffle_participation",
-      question: "Sorteo de Incentivos",
-      subtitle:
-        "Si desea participar en el sorteo de una tarjeta regalo, por favor facilite sus datos de contacto.",
-      type: "raffle",
-      required: false,
     },
     {
       id: "final",
@@ -539,6 +537,13 @@ export default function App() {
 
   const handleAnswer = (value) => {
     setAnswers({ ...answers, [currentQuestion.id]: value });
+  };
+
+  const handleOtherInput = (questionId, textValue) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [`${questionId}_other_text`]: textValue,
+    }));
   };
 
   const handleRaffleInput = (field, value) => {
@@ -572,6 +577,17 @@ export default function App() {
     }
   };
 
+  // Manejador simplificado para la matriz (Contexto -> Frecuencia)
+  const handleMatrixAnswerSimple = (contextId, frequencyValue) => {
+    setAnswers((prev) => ({
+      ...prev,
+      [currentQuestion.id]: {
+        ...(prev[currentQuestion.id] || {}),
+        [contextId]: frequencyValue,
+      },
+    }));
+  };
+
   const handleSubmitSurvey = async () => {
     if (!user) {
       setSubmitError("Error de sesión. Por favor recargue la página.");
@@ -581,10 +597,15 @@ export default function App() {
     setIsSubmitting(true);
     setSubmitError(null);
 
+    // Calcular si es una participación válida para sorteo (si rellenó los datos al inicio)
+    const isRaffleParticipant =
+      answers.raffle_email && answers.raffle_name && answers.raffle_terms;
+
     try {
       await addDoc(collection(db, COLLECTION_NAME), {
         userId: user.uid,
         answers: answers,
+        raffle_valid: !!isRaffleParticipant,
         submittedAt: serverTimestamp(),
         deviceInfo: {
           userAgent: navigator.userAgent,
@@ -620,6 +641,13 @@ export default function App() {
   const canProceed = () => {
     const answer = answers[currentQuestion?.id];
     if (!currentQuestion?.required) return true;
+
+    // Validación Matrix Simple (Debe responder al menos un contexto para proceder, o todos si eres estricto)
+    if (currentQuestion.type === "matrix_context_freq") {
+      // Opcional: Requerir que responda a todos los contextos?
+      // Aquí validamos que haya respondido a al menos uno.
+      return answer && Object.keys(answer).length > 0;
+    }
 
     if (currentQuestion.type === "multiple") {
       if (currentQuestion.minSelections) {
@@ -773,7 +801,7 @@ export default function App() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Correo electrónico *
+                Correo electrónico <span className="text-red-600">*</span>
               </label>
               <input
                 type="email"
@@ -787,7 +815,7 @@ export default function App() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Nombre y Apellidos *
+                Nombre y Apellidos <span className="text-red-600">*</span>
               </label>
               <input
                 type="text"
@@ -968,30 +996,47 @@ export default function App() {
           {currentQuestion?.type === "single" && (
             <div className="space-y-3">
               {currentQuestion.options.map((option) => (
-                <label
-                  key={option.value}
-                  onClick={() => handleAnswer(option.value)}
-                  className={`flex items-center p-4 border rounded-lg cursor-pointer transition-all hover:shadow-sm ${
-                    answers[currentQuestion.id] === option.value
-                      ? "border-indigo-600 bg-indigo-50/50"
-                      : "border-gray-200 hover:border-indigo-300 bg-white"
-                  }`}
-                >
-                  <div
-                    className={`w-4 h-4 rounded-full border flex items-center justify-center mr-3 transition-colors ${
+                <div key={option.value}>
+                  <label
+                    onClick={() => handleAnswer(option.value)}
+                    className={`flex items-center p-4 border rounded-lg cursor-pointer transition-all hover:shadow-sm ${
                       answers[currentQuestion.id] === option.value
-                        ? "border-indigo-600"
-                        : "border-gray-300"
+                        ? "border-indigo-600 bg-indigo-50/50"
+                        : "border-gray-200 hover:border-indigo-300 bg-white"
                     }`}
                   >
-                    {answers[currentQuestion.id] === option.value && (
-                      <div className="w-2 h-2 rounded-full bg-indigo-600" />
+                    <div
+                      className={`w-4 h-4 rounded-full border flex items-center justify-center mr-3 transition-colors ${
+                        answers[currentQuestion.id] === option.value
+                          ? "border-indigo-600"
+                          : "border-gray-300"
+                      }`}
+                    >
+                      {answers[currentQuestion.id] === option.value && (
+                        <div className="w-2 h-2 rounded-full bg-indigo-600" />
+                      )}
+                    </div>
+                    <span className="text-gray-700 text-sm font-medium">
+                      {option.label}
+                    </span>
+                  </label>
+                  {/* INPUT DE TEXTO PARA "OTROS" */}
+                  {option.hasInput &&
+                    answers[currentQuestion.id] === option.value && (
+                      <input
+                        type="text"
+                        placeholder="Especifique..."
+                        className="mt-2 w-full p-2 border border-gray-300 rounded text-sm focus:border-indigo-500 outline-none ml-8 w-[calc(100%-2rem)]"
+                        value={
+                          answers[`${currentQuestion.id}_other_text`] || ""
+                        }
+                        onChange={(e) =>
+                          handleOtherInput(currentQuestion.id, e.target.value)
+                        }
+                        onClick={(e) => e.stopPropagation()}
+                      />
                     )}
-                  </div>
-                  <span className="text-gray-700 text-sm font-medium">
-                    {option.label}
-                  </span>
-                </label>
+                </div>
               ))}
             </div>
           )}
@@ -1002,35 +1047,51 @@ export default function App() {
                 const selected = answers[currentQuestion.id] || [];
                 const isSelected = selected.includes(option.value);
                 return (
-                  <label
-                    key={option.value}
-                    onClick={() =>
-                      handleMultipleAnswer(
-                        option.value,
-                        currentQuestion.maxSelections
-                      )
-                    }
-                    className={`flex items-center p-4 border rounded-lg cursor-pointer transition-all hover:shadow-sm ${
-                      isSelected
-                        ? "border-indigo-600 bg-indigo-50/50"
-                        : "border-gray-200 hover:border-indigo-300 bg-white"
-                    }`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded border flex items-center justify-center mr-3 transition-colors ${
+                  <div key={option.value}>
+                    <label
+                      onClick={() =>
+                        handleMultipleAnswer(
+                          option.value,
+                          currentQuestion.maxSelections
+                        )
+                      }
+                      className={`flex items-center p-4 border rounded-lg cursor-pointer transition-all hover:shadow-sm ${
                         isSelected
-                          ? "bg-indigo-600 border-indigo-600"
-                          : "border-gray-300 bg-white"
+                          ? "border-indigo-600 bg-indigo-50/50"
+                          : "border-gray-200 hover:border-indigo-300 bg-white"
                       }`}
                     >
-                      {isSelected && (
-                        <CheckCircle className="w-3 h-3 text-white" />
-                      )}
-                    </div>
-                    <span className="text-gray-700 text-sm font-medium">
-                      {option.label}
-                    </span>
-                  </label>
+                      <div
+                        className={`w-4 h-4 rounded border flex items-center justify-center mr-3 transition-colors ${
+                          isSelected
+                            ? "bg-indigo-600 border-indigo-600"
+                            : "border-gray-300 bg-white"
+                        }`}
+                      >
+                        {isSelected && (
+                          <CheckCircle className="w-3 h-3 text-white" />
+                        )}
+                      </div>
+                      <span className="text-gray-700 text-sm font-medium">
+                        {option.label}
+                      </span>
+                    </label>
+                    {/* INPUT DE TEXTO PARA "OTROS" */}
+                    {option.hasInput && isSelected && (
+                      <input
+                        type="text"
+                        placeholder="Especifique..."
+                        className="mt-2 w-full p-2 border border-gray-300 rounded text-sm focus:border-indigo-500 outline-none ml-8 w-[calc(100%-2rem)]"
+                        value={
+                          answers[`${currentQuestion.id}_other_text`] || ""
+                        }
+                        onChange={(e) =>
+                          handleOtherInput(currentQuestion.id, e.target.value)
+                        }
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    )}
+                  </div>
                 );
               })}
               {currentQuestion.maxSelections && (
@@ -1125,6 +1186,71 @@ export default function App() {
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* TIPO: MATRIX (Contexto x Frecuencia) */}
+          {currentQuestion.type === "matrix_context_freq" && (
+            <div className="space-y-6">
+              {/* Get selected vehicle label */}
+              {(() => {
+                const vCode = answers.vehicles;
+                if (!vCode || vCode === "none")
+                  return (
+                    <p className="text-gray-500 italic">
+                      No hay vehículo seleccionado.
+                    </p>
+                  );
+                const vLabel = questions
+                  .find((q) => q.id === "vehicles")
+                  .options.find((o) => o.value === vCode)?.label;
+
+                return (
+                  <div className="bg-gray-50 p-5 rounded-xl border border-gray-200">
+                    <h3 className="font-bold text-indigo-700 mb-4 flex items-center text-lg">
+                      <Car className="w-5 h-5 mr-2" /> {vLabel}
+                    </h3>
+                    <p className="text-sm text-gray-500 mb-4">
+                      Indique la frecuencia de uso para cada situación:
+                    </p>
+
+                    <div className="space-y-4">
+                      {MATRIX_CONTEXTS.map((ctx) => (
+                        <div
+                          key={ctx.id}
+                          className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm"
+                        >
+                          <p className="text-sm font-semibold text-gray-700 mb-2">
+                            {ctx.label}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {MATRIX_FREQUENCIES.map((freq) => {
+                              const currentVal =
+                                answers[currentQuestion.id]?.[ctx.id];
+                              const isSelected = currentVal === freq.value;
+                              return (
+                                <button
+                                  key={freq.value}
+                                  onClick={() =>
+                                    handleMatrixAnswerSimple(ctx.id, freq.value)
+                                  }
+                                  className={`px-3 py-1 text-xs rounded-full border transition-all ${
+                                    isSelected
+                                      ? "bg-indigo-600 text-white border-indigo-600"
+                                      : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100"
+                                  }`}
+                                >
+                                  {freq.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
