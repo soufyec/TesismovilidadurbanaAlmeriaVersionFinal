@@ -680,8 +680,10 @@ export default function App() {
           </p>
           <div className="bg-blue-50 p-4 rounded-lg mb-6">
             <p className="text-sm text-gray-700">
-              Puede compartir este cuestionario con otros residentes de Almería
-              para aumentar la representatividad del estudio.
+              Agradecera mucho si comparte este cuestionario con otros
+              residentes de Almería para aumentar la representatividad del
+              estudio:
+              https://tesismovilidadurbana-almeria-version-final-d5yj90l4k.vercel.app
             </p>
           </div>
           <button
